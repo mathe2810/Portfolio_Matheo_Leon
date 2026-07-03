@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Portfolio — Mon Nom</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <a class="logo" href="#home">MonNom</a>
+      <button id="nav-toggle" aria-label="Toggle navigation">☰</button>
+      <nav id="site-nav" class="nav">
+        <a href="#home" class="nav-link">Accueil</a>
+        <a href="#about" class="nav-link">À propos</a>
+        <a href="#projects" class="nav-link">Projets</a>
+        <a href="#games" class="nav-link">Jeux</a>
+        <a href="#contact" class="nav-link">Contact</a>
+        <a class="cv-btn" href="assets/cv.pdf" download target="_blank">Télécharger CV (PDF)</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section id="home" class="hero">
+      <div class="container hero-inner">
+        <h1>Bonjour — je suis Mon Nom</h1>
+        <p>Développeur · Créateur · Joueur de prototypes</p>
+        <p><a class="primary" href="#projects">Voir mes projets</a></p>
+      </div>
+    </section>
+
+    <section id="about" class="section">
+      <div class="container">
+        <h2>À propos</h2>
+        <p>Présentation courte. Remplacez ce texte par votre bio.</p>
+      </div>
+    </section>
+
+    <section id="projects" class="section">
+      <div class="container">
+        <h2>Projets</h2>
+        <div class="grid">
+          <article class="card">
+            <h3>Portfolio statique</h3>
+            <p>Site responsive hébergé sur GitHub Pages ou votre Raspberry Pi.</p>
+          </article>
+          <article class="card">
+            <h3>Jeu prototype</h3>
+            <p>Mini-jeux en JS — disponibles dans la section Jeux.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="games" class="section">
+      <div class="container">
+        <h2>Jeux</h2>
+        <div class="grid">
+          <a class="card-link" href="games/tictactoe.html">Tic‑Tac‑Toe</a>
+          <a class="card-link" href="games/memory.html">Memory (paires)</a>
+        </div>
+      </div>
+    </section>
+
+    <section id="contact" class="section">
+      <div class="container">
+        <h2>Contact</h2>
+        <p>Email: votre@email.example</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">© 2026 Mon Nom</div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
