@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <!-- Correction du viewport pour forcer le bon zoom sur mobile et bloquer le zoom accidentel -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>IsometricEngine — Web</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="content">
+    <div id="canvasContainer">
+      <canvas id="game" width="900" height="800"></canvas>
+    </div>
+    <aside id="sidebar">
+      <div id="ui">
+        <h1 style="font-family:'Cinzel',serif;text-align:center;margin:0 0 16px 0;font-size:24px;color:#d4af37;text-shadow:2px 2px 4px rgba(0,0,0,0.8)">⚔ Isometric ⚔</h1>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
+          <button id="btnReset">Reset</button>
+          <button id="btnCompute">Compute</button>
+          <button id="btnMapOnly">Carte seule</button>
+        </div>
+        <fieldset style="border:2px solid #8b7355;padding:12px;margin:8px 0;background:rgba(0,0,0,0.3);border-radius:3px">
+          <legend style="color:#d4af37;font-weight:bold;padding:0 6px">Carte</legend>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <label style="display:flex;gap:4px;align-items:center">
+              W:
+              <input id="inputWidth" type="number" min="5" max="100" value="20" style="width:50px" />
+              H:
+              <input id="inputHeight" type="number" min="5" max="100" value="20" style="width:50px" />
+            </label>
+            <label style="display:flex;gap:4px;align-items:center">
+              Obstacles:
+              <input id="inputObstacleProb" type="number" min="0" max="50" value="8" step="1" style="width:50px" />
+              %
+            </label>
+            <div style="display:flex;gap:4px">
+              <button id="btnCreateMap" style="flex:1">Créer</button>
+              <button id="btnRegenerate" style="flex:1">Refaire</button>
+            </div>
+          </div>
+        </fieldset>
+        <fieldset style="border:2px solid #8b7355;padding:12px;margin:8px 0;background:rgba(0,0,0,0.3);border-radius:3px">
+          <legend style="color:#d4af37;font-weight:bold;padding:0 6px;cursor:pointer" onclick="toggleSection('controlsSection')" title="Clic pour plier/déplier">🔸 Contrôles</legend>
+          <div id="controlsSection" class="collapsible-content" style="display:block">
+            <div id="controls">
+              <strong>Touches :</strong>
+              <ul>
+                <li>clic gauche — définir départ</li>
+                <li>clic droit — définir arrivée</li>
+                <li>Space — calculer chemin (Dijkstra). Les diagonales sont autorisées.</li>
+                <li>Flèches — déplacer la vue</li>
+                <li>R ou Reset — réinitialiser sélection</li>
+                <li>S — sauvegarder la map (non implémenté côté serveur)</li>
+              </ul>
+            </div>
+          </div>
+        </fieldset>
+        <fieldset style="border:2px solid #8b7355;padding:12px;margin:8px 0;background:rgba(0,0,0,0.3);border-radius:3px">
+          <legend style="color:#d4af37;font-weight:bold;padding:0 6px;cursor:pointer" onclick="toggleSection('tilesSection')" title="Clic pour plier/déplier">🔸 Tuiles</legend>
+          <div id="tilesSection" class="collapsible-content" style="display:block">
+            <div id="tilesPalette">
+              <!-- Tuiles générées par JS -->
+            </div>
+          </div>
+        </fieldset>
+        <fieldset style="border:2px solid #8b7355;padding:12px;margin:8px 0;background:rgba(0,0,0,0.3);border-radius:3px">
+          <legend style="color:#d4af37;font-weight:bold;padding:0 6px">Infos</legend>
+          <div id="info">
+            <p id="infoStart">Départ: -</p>
+            <p id="infoGoal">Arrivée: -</p>
+            <p id="infoPath">Longueur du chemin: -</p>
+          </div>
+        </fieldset>
+      </div>
+    </aside>
+  </div>
+  <script src="main.js"></script>
+</body>
+</html>
