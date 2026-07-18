@@ -76,6 +76,95 @@ let initialZoom = 1;
 let touchTimer;
 const LONG_PRESS_DELAY = 600; // ms
 
+
+// ==========================================
+// AJOUT : SYSTÈME DE TEXTURE DE TEST
+// ==========================================
+
+// Image de texture qui sera associée à notre ID de test
+let testTextureImage = null;
+
+// Génère une texture procédurale de pierre (ID 10) pour tester sans charger de fichier externe
+function createProceduralTestTexture() {
+  const texCanvas = document.createElement('canvas');
+  texCanvas.width = 128;
+  texCanvas.height = 128;
+  const tCtx = texCanvas.getContext('2d');
+
+  // Fond gris de base
+  tCtx.fillStyle = '#8888aa';
+  tCtx.fillRect(0, 0, 128, 128);
+
+  // Ajout d'un motif de dalles/bruit pour simuler de la pierre
+  tCtx.strokeStyle = '#555577';
+  tCtx.lineWidth = 4;
+  // Tracé d'un quadrillage de pavés
+  for (let i = 0; i <= 128; i += 32) {
+    tCtx.beginPath();
+    tCtx.moveTo(i, 0); tCtx.lineTo(i, 128);
+    tCtx.stroke();
+    tCtx.beginPath();
+    tCtx.moveTo(0, i); tCtx.lineTo(128, i);
+    tCtx.stroke();
+  }
+
+  // Petites tâches de bruit organiques pour donner du grain
+  tCtx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+  for (let i = 0; i < 40; i++) {
+    tCtx.fillRect(Math.random() * 128, Math.random() * 128, 6, 6);
+  }
+  tCtx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+  for (let i = 0; i < 40; i++) {
+    tCtx.fillRect(Math.random() * 128, Math.random() * 128, 6, 6);
+  }
+
+  testTextureImage = new Image();
+  testTextureImage.src = texCanvas.toDataURL();
+}
+
+// Initialisation de la texture
+//createProceduralTestTexture();
+
+testTextureImage = new Image();
+testTextureImage.src = 'tales.png'; // Assurez-vous que ce fichier existe dans le même répertoire
+testTextureImage.onload = () => {
+  draw(); // Redessine la scène une fois la texture chargée
+};
+
+// Fonction mathématique d'affichage d'un triangle texturé déformé (Homographie 2D)
+function drawTextureTriangle(ctx, img, x0, y0, x1, y1, x2, y2, u0, v0, u1, v1, u2, v2) {
+  ctx.save();
+  
+  // Création du masque triangulaire pour ne pas déborder
+  ctx.beginPath();
+  ctx.moveTo(x0, y0);
+  ctx.lineTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.closePath();
+  ctx.clip();
+
+  // Matrice de transformation affine
+  const delta = u0 * v1 + v0 * u2 + u1 * v2 - v1 * u2 - v0 * u1 - u0 * v2;
+  if (delta === 0) {
+    ctx.restore();
+    return;
+  }
+
+  const a = (x0 * v1 + v0 * x2 + x1 * v2 - v1 * x2 - v0 * x1 - x0 * v2) / delta;
+  const b = (y0 * v1 + v0 * y2 + y1 * v2 - v1 * y2 - v0 * y1 - y0 * v2) / delta;
+  const c = (u0 * x1 + x0 * u2 + u1 * x2 - x1 * u2 - x0 * u1 - u0 * x2) / delta;
+  const d = (u0 * y1 + y0 * u2 + u1 * y2 - y1 * u2 - y0 * u1 - u0 * y2) / delta;
+  const e = (u0 * v1 * x2 + v0 * u2 * x1 + u1 * v2 * x0 - v1 * u2 * x0 - v0 * u1 * x2 - u0 * v2 * x1) / delta;
+  const f = (u0 * v1 * y2 + v0 * u2 * y1 + u1 * v2 * y0 - v1 * u2 * y0 - v0 * u1 * y2 - u0 * v2 * y1) / delta;
+
+  // Appliquer la transformation et dessiner l'image originale
+  ctx.transform(a, b, c, d, e, f);
+  ctx.drawImage(img, 0, 0);
+  
+  ctx.restore();
+}
+
+
 // ==========================================
 // 2. UTILITAIRES DE GÉOMÉTRIE ET MATHS (PROJECTIONS)
 // ==========================================
@@ -521,24 +610,77 @@ function draw() {
     const ptLeft   = projectPoint(x, y + 1, elevLeft, origin);
 
     if (tile) {
-      const slope = (elevTop + elevLeft) - (elevBottom + elevRight);
-      let fillColor = tile.color;
-      if (slope > 2) {
-        fillColor = shadeColor(tile.color, 0.15); 
-      } else if (slope < -2) {
-        const darkness = Math.max(-0.4, slope * 0.006);
-        fillColor = shadeColor(tile.color, darkness); 
+      // --- MODIFICATION : RENDU AVEC TEXTURE OU COULEUR UNIE ---
+      // Si l'ID est 10 (Pierre) et que la texture est disponible, on dessine la texture
+      if (tileId === 10 && testTextureImage) {
+        const tw = testTextureImage.width;
+        const th = testTextureImage.height;
+
+        // Définition des coordonnées U,V fixes sur l'image source (losange parfait)
+        const uTop = tw / 2,     vTop = 0;
+        const uRight = tw,       vRight = th / 2;
+        const uBottom = tw / 2,  vBottom = th;
+        const uLeft = 0,         vLeft = th / 2;
+
+        // Division de la tuile déformée en deux triangles
+        // Triangle 1 (Haut, Droite, Gauche)
+        drawTextureTriangle(ctx, testTextureImage, 
+          ptTop.x, ptTop.y, ptRight.x, ptRight.y, ptLeft.x, ptLeft.y,
+          uTop, vTop, uRight, vRight, uLeft, vLeft
+        );
+        // Triangle 2 (Bas, Droite, Gauche)
+        drawTextureTriangle(ctx, testTextureImage, 
+          ptBottom.x, ptBottom.y, ptRight.x, ptRight.y, ptLeft.x, ptLeft.y,
+          uBottom, vBottom, uRight, vRight, uLeft, vLeft
+        );
+
+        // --- APPLICATION DE L'OMBRAGE DU RELIEF SUR LA TEXTURE ---
+        const slope = (elevTop + elevLeft) - (elevBottom + elevRight);
+        if (Math.abs(slope) > 2) {
+          ctx.save();
+          // Masque de la tuile pour n'appliquer l'ombre que sur celle-ci
+          ctx.beginPath();
+          ctx.moveTo(ptTop.x, ptTop.y);
+          ctx.lineTo(ptRight.x, ptRight.y);
+          ctx.lineTo(ptBottom.x, ptBottom.y);
+          ctx.lineTo(ptLeft.x, ptLeft.y);
+          ctx.closePath();
+          ctx.clip();
+
+          // Mode de fusion Multiply pour intégrer l'ombre à la texture sans effacer ses détails
+          ctx.globalCompositeOperation = 'multiply';
+          if (slope > 2) {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.15)'; // Éclaircissement
+          } else {
+            const darkness = Math.min(0.4, Math.abs(slope) * 0.006);
+            ctx.fillStyle = `rgba(0, 0, 0, ${darkness})`; // Assombrissement
+          }
+          ctx.fill();
+          ctx.restore();
+        }
+
+      } else {
+        // Rendu classique à plat couleur unie si pas texturé
+        const slope = (elevTop + elevLeft) - (elevBottom + elevRight);
+        let fillColor = tile.color;
+        if (slope > 2) {
+          fillColor = shadeColor(tile.color, 0.15); 
+        } else if (slope < -2) {
+          const darkness = Math.max(-0.4, slope * 0.006);
+          fillColor = shadeColor(tile.color, darkness); 
+        }
+
+        ctx.fillStyle = fillColor;
+        ctx.beginPath();
+        ctx.moveTo(ptTop.x, ptTop.y);
+        ctx.lineTo(ptRight.x, ptRight.y);
+        ctx.lineTo(ptBottom.x, ptBottom.y);
+        ctx.lineTo(ptLeft.x, ptLeft.y);
+        ctx.closePath();
+        ctx.fill();
       }
 
-      ctx.fillStyle = fillColor;
-      ctx.beginPath();
-      ctx.moveTo(ptTop.x, ptTop.y);
-      ctx.lineTo(ptRight.x, ptRight.y);
-      ctx.lineTo(ptBottom.x, ptBottom.y);
-      ctx.lineTo(ptLeft.x, ptLeft.y);
-      ctx.closePath();
-      ctx.fill();
-
+      // Bordures de tuiles identiques
       ctx.strokeStyle = 'rgba(0,0,0,0.15)';
       ctx.lineWidth = 1;
       ctx.stroke();
