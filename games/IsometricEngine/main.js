@@ -20,6 +20,52 @@ const tiles = {
   14: { name: "Décor", color: "#9b7653", height: 0 }
 };
 
+// Bibliothèque d'objets en fausse 3D adaptés au relief
+const objectTypes = {
+  'grass_tuft': {
+    name: "Touffe d'herbe",
+    alignWithSlope: true, // S'incline avec la pente de la colline
+    draw: (ctx, size) => {
+      // NOTE POUR PLUS TARD : Quand tu auras ton image Paint, remplace ce bloc par :
+      // ctx.drawImage(monImageHerbePaint, -size, -size * 2, size * 2, size * 2);
+      
+      ctx.fillStyle = "#558b2f"; 
+      ctx.beginPath();
+      ctx.moveTo(-size, 0); ctx.lineTo(-size * 0.5, -size * 2); ctx.lineTo(0, 0);
+      ctx.moveTo(0, 0); ctx.lineTo(size * 0.2, -size * 2.5); ctx.lineTo(size * 0.8, 0);
+      ctx.moveTo(-size * 0.3, 0); ctx.lineTo(size * 0.5, -size * 1.5); ctx.lineTo(size, 0);
+      ctx.fill();
+    }
+  },
+  'rock': {
+    name: "Petite Pierre",
+    alignWithSlope: false, // Reste vertical, mais possède une ombre au sol
+    draw: (ctx, size) => {
+      // NOTE POUR PLUS TARD : Remplacer par ctx.drawImage(monImageRochePaint, -size, -size * 1.5, size * 2, size * 2);
+      
+      // Dessin de la roche 3D
+      ctx.fillStyle = "#90a4ae";
+      ctx.beginPath();
+      ctx.moveTo(-size, 0);
+      ctx.lineTo(-size * 0.8, -size * 1.2);
+      ctx.lineTo(size * 0.2, -size * 1.5);
+      ctx.lineTo(size, -size * 0.5);
+      ctx.lineTo(size * 0.8, 0);
+      ctx.closePath();
+      ctx.fill();
+      
+      // Face ombragée
+      ctx.fillStyle = "#78909c";
+      ctx.beginPath();
+      ctx.moveTo(size * 0.2, -size * 1.5);
+      ctx.lineTo(size, -size * 0.5);
+      ctx.lineTo(size * 0.8, 0);
+      ctx.lineTo(0, 0);
+      ctx.fill();
+    }
+  }
+};
+
 // Canvas et dimensions de base
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -32,19 +78,19 @@ const TILE_H = 54;
 let WORLD_W = 20; 
 let WORLD_H = 20; 
 let mapData = []; 
-let elevationGrid = []; // Altitude des sommets (WORLD_W+1) * (WORLD_H+1)
+let elevationGrid = []; 
+let mapObjects = [];    
 let start = -1;
 let goal = -1;
 let path = [];
 let scale = 1; 
 
-// Origine ajustée pour centrer parfaitement la grille 20x20
 const origin = { x: 9.5, y: 1.5 }; 
 const ELEVATION_SCALE = 1.0; 
 
 // Paramètres de l'éditeur
-let editorMode = "paint"; // "paint", "elevation" ou "pathfinding"
-let elevationTool = "raise"; // "raise" ou "lower"
+let editorMode = "paint"; 
+let elevationTool = "raise"; 
 let selectedTileId = 0;   
 let isMouseDown = false; 
 let lastPaintedCell = -1; 
@@ -74,102 +120,101 @@ let initialZoom = 1;
 
 // Appui long pour simuler le clic droit sur mobile
 let touchTimer;
-const LONG_PRESS_DELAY = 600; // ms
+const LONG_PRESS_DELAY = 600; 
 
-
-// ==========================================
-// AJOUT : SYSTÈME DE TEXTURE DE TEST
-// ==========================================
-
-// Image de texture qui sera associée à notre ID de test
+// SYSTEME DE PERFORMANCE & TEXTURE OPTIMISÉE
 let testTextureImage = null;
+let tilePattern = null; 
 
-// Génère une texture procédurale de pierre (ID 10) pour tester sans charger de fichier externe
-function createProceduralTestTexture() {
-  const texCanvas = document.createElement('canvas');
-  texCanvas.width = 128;
-  texCanvas.height = 128;
-  const tCtx = texCanvas.getContext('2d');
-
-  // Fond gris de base
-  tCtx.fillStyle = '#8888aa';
-  tCtx.fillRect(0, 0, 128, 128);
-
-  // Ajout d'un motif de dalles/bruit pour simuler de la pierre
-  tCtx.strokeStyle = '#555577';
-  tCtx.lineWidth = 4;
-  // Tracé d'un quadrillage de pavés
-  for (let i = 0; i <= 128; i += 32) {
-    tCtx.beginPath();
-    tCtx.moveTo(i, 0); tCtx.lineTo(i, 128);
-    tCtx.stroke();
-    tCtx.beginPath();
-    tCtx.moveTo(0, i); tCtx.lineTo(128, i);
-    tCtx.stroke();
-  }
-
-  // Petites tâches de bruit organiques pour donner du grain
-  tCtx.fillStyle = 'rgba(255, 255, 255, 0.15)';
-  for (let i = 0; i < 40; i++) {
-    tCtx.fillRect(Math.random() * 128, Math.random() * 128, 6, 6);
-  }
-  tCtx.fillStyle = 'rgba(0, 0, 0, 0.15)';
-  for (let i = 0; i < 40; i++) {
-    tCtx.fillRect(Math.random() * 128, Math.random() * 128, 6, 6);
-  }
-
-  testTextureImage = new Image();
-  testTextureImage.src = texCanvas.toDataURL();
-}
-
-// Initialisation de la texture
-//createProceduralTestTexture();
+let lastCalledTime = 0;
+let fps = 0;
+let frameTime = 0;
+let renderedTilesCount = 0;
+let fpsDisplayInterval = 0;
 
 testTextureImage = new Image();
-testTextureImage.src = 'tales.png'; // Assurez-vous que ce fichier existe dans le même répertoire
+testTextureImage.src = 'tales.png';
 testTextureImage.onload = () => {
-  draw(); // Redessine la scène une fois la texture chargée
+  tilePattern = ctx.createPattern(testTextureImage, 'repeat');
+  triggerRender();
 };
 
-// Fonction mathématique d'affichage d'un triangle texturé déformé (Homographie 2D)
-function drawTextureTriangle(ctx, img, x0, y0, x1, y1, x2, y2, u0, v0, u1, v1, u2, v2) {
+function triggerRender() {
+  requestAnimationFrame(draw);
+}
+
+// Fonction mathématique d'affichage d'un triangle texturé déformé stabilisée
+function drawTextureTriangle(ctx, img, x0, y0, x1, y1, x2, y2, u0, v0, u1, v1, u2, v2, isUpperTriangle = true) {
   ctx.save();
   
-  // Création du masque triangulaire pour ne pas déborder
+  const bleed = 0.7; 
+  let bx1 = x1, by1 = y1; 
+  let bx2 = x2, by2 = y2; 
+
+  if (isUpperTriangle) {
+    by1 += bleed;
+    by2 += bleed;
+  } else {
+    by1 -= bleed;
+    by2 -= bleed;
+  }
+
   ctx.beginPath();
   ctx.moveTo(x0, y0);
-  ctx.lineTo(x1, y1);
-  ctx.lineTo(x2, y2);
+  ctx.lineTo(bx1, by1);
+  ctx.lineTo(bx2, by2);
   ctx.closePath();
   ctx.clip();
 
-  // Matrice de transformation affine
-  const delta = u0 * v1 + v0 * u2 + u1 * v2 - v1 * u2 - v0 * u1 - u0 * v2;
+  const delta = u0 * (v1 - v2) + u1 * (v2 - v0) + u2 * (v0 - v1);
   if (delta === 0) {
     ctx.restore();
     return;
   }
 
-  const a = (x0 * v1 + v0 * x2 + x1 * v2 - v1 * x2 - v0 * x1 - x0 * v2) / delta;
-  const b = (y0 * v1 + v0 * y2 + y1 * v2 - v1 * y2 - v0 * y1 - y0 * v2) / delta;
-  const c = (u0 * x1 + x0 * u2 + u1 * x2 - x1 * u2 - x0 * u1 - u0 * x2) / delta;
-  const d = (u0 * y1 + y0 * u2 + u1 * y2 - y1 * u2 - y0 * u1 - u0 * y2) / delta;
-  const e = (u0 * v1 * x2 + v0 * u2 * x1 + u1 * v2 * x0 - v1 * u2 * x0 - v0 * u1 * x2 - u0 * v2 * x1) / delta;
-  const f = (u0 * v1 * y2 + v0 * u2 * y1 + u1 * v2 * y0 - v1 * u2 * y0 - v0 * u1 * y2 - u0 * v2 * y1) / delta;
+  const a = (x0 * (v1 - v2) + x1 * (v2 - v0) + x2 * (v0 - v1)) / delta;
+  const c = (x0 * (u2 - u1) + x1 * (u0 - u2) + x2 * (u1 - u0)) / delta;
+  const e = (x0 * (u1 * v2 - u2 * v1) + x1 * (u2 * v0 - u0 * v2) + x2 * (u0 * v1 - u1 * v0)) / delta;
 
-  // Appliquer la transformation et dessiner l'image originale
+  const b = (y0 * (v1 - v2) + y1 * (v2 - v0) + y2 * (v0 - v1)) / delta;
+  const d = (y0 * (u2 - u1) + y1 * (u0 - u2) + y2 * (u1 - u0)) / delta;
+  const f = (y0 * (u1 * v2 - u2 * v1) + y1 * (u2 * v0 - u0 * v2) + y2 * (u0 * v1 - u1 * v0)) / delta;
+
   ctx.transform(a, b, c, d, e, f);
   ctx.drawImage(img, 0, 0);
   
   ctx.restore();
+
+  if (tilePattern) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(bx1, by1);
+    ctx.lineTo(bx2, by2);
+    ctx.closePath();
+    ctx.clip();
+
+    ctx.transform(a, b, c, d, e, f);
+    
+    try {
+      ctx.strokeStyle = tilePattern; 
+      const matrixScale = Math.sqrt(a * a + b * b + c * c + d * d) || 1;
+      ctx.lineWidth = 0.4 / matrixScale;
+      
+      ctx.beginPath();
+      ctx.moveTo(bx1, by1);
+      ctx.lineTo(bx2, by2);
+      ctx.stroke();
+    } catch(err) {}
+    
+    ctx.restore();
+  }
 }
 
-
 // ==========================================
-// 2. UTILITAIRES DE GÉOMÉTRIE ET MATHS (PROJECTIONS)
+// 2. UTILITAIRES DE GÉOMÉTRIE ET MATHS
 // ==========================================
 
-// Projette des coordonnées 2D plates en coordonnées 3D Isométriques
 function projectPoint(gx, gy, elevation, origin) {
   return {
     x: ((origin.x * TILE_W) + (gx - gy) * (TILE_W / 2)) * zoom + panX,
@@ -177,24 +222,19 @@ function projectPoint(gx, gy, elevation, origin) {
   };
 }
 
-// Projection inverse simplifiée (Sans relief) pour le frustum culling
 function unprojectPoint(screenX, screenY, origin) {
-  // Ajuste l'écran par rapport à la caméra, zoom et scale globale du canvas
   const cx = (screenX / scale - panX) / zoom;
   const cy = (screenY / scale - panY) / zoom;
   
-  // Repasse l'origine
   const dx = cx - (origin.x * TILE_W);
   const dy = cy - (origin.y * TILE_H);
   
-  // Formule inverse de la rotation isométrique
   const gx = (dx / (TILE_W / 2) + dy / (TILE_H / 2)) / 2;
   const gy = (dy / (TILE_H / 2) - dx / (TILE_W / 2)) / 2;
   
   return { x: gx, y: gy };
 }
 
-// Convertit les coordonnées brutes (clientX, clientY) de l'écran en index de cellule sur la grille
 function canvasToCell(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
   const mx = (clientX - rect.left) / scale;
@@ -208,7 +248,6 @@ function canvasToCell(clientX, clientY) {
       tiles_to_check.push({ x, y, depth: y + x });
     }
   }
-  // Tri de l'avant-plan vers l'arrière-plan
   tiles_to_check.sort((a, b) => b.depth - a.depth);
 
   for (const tile of tiles_to_check) {
@@ -241,14 +280,12 @@ function canvasToCell(clientX, clientY) {
   return -1;
 }
 
-// Calcule l'écart entre deux points tactiles pour le zoom
 function getDistance(p1, p2) {
   const dx = p1.clientX - p2.clientX;
   const dy = p1.clientY - p2.clientY;
   return Math.sqrt(dx * dx + dy * dy);
 }
 
-// Ajoute du contraste/ombrage à une couleur hexadécimale
 function shadeColor(color, percent) {
   let R = parseInt(color.substring(1, 3), 16);
   let G = parseInt(color.substring(3, 5), 16);
@@ -269,12 +306,10 @@ function shadeColor(color, percent) {
   return "#" + RR + GG + BB;
 }
 
-
 // ==========================================
 // 3. GÉNÉRATION DE TERRAIN ET RELIEF
 // ==========================================
 
-// Génère de façon procédurale des collines d'altitudes
 function generateElevation(width, height) {
   const gridW = width + 1;
   const gridH = height + 1;
@@ -300,7 +335,30 @@ function generateElevation(width, height) {
   return grid;
 }
 
-// Récupère l'altitude moyenne d'une tuile à partir de ses 4 sommets
+function generateMapObjects() {
+  mapObjects = new Array(WORLD_W * WORLD_H).fill(null);
+  for (let i = 0; i < mapData.length; i++) {
+    if (mapData[i] === 0) {
+      const rand = Math.random();
+      if (rand < 0.28) { // Augmentation de la densité globale
+        mapObjects[i] = {
+          type: 'grass_tuft',
+          size: 4 + Math.random() * 5, 
+          offsetX: -6 + Math.random() * 12, 
+          offsetY: -6 + Math.random() * 12
+        };
+      } else if (rand < 0.32) { 
+        mapObjects[i] = {
+          type: 'rock',
+          size: 4 + Math.random() * 5,
+          offsetX: -5 + Math.random() * 10,
+          offsetY: -5 + Math.random() * 10
+        };
+      }
+    }
+  }
+}
+
 function getTileAverageElevation(tileX, tileY) {
   const gridW = WORLD_W + 1;
   const tLeft  = elevationGrid[tileY * gridW + tileX] || 0;
@@ -310,7 +368,6 @@ function getTileAverageElevation(tileX, tileY) {
   return (tLeft + tRight + bRight + bLeft) / 4;
 }
 
-// Modifie l'altitude des 4 sommets d'une cellule (monte ou baisse)
 function modifyElevationAtCell(cellIndex, raise = true) {
   const x = cellIndex % WORLD_W;
   const y = Math.floor(cellIndex / WORLD_W);
@@ -331,29 +388,25 @@ function modifyElevationAtCell(cellIndex, raise = true) {
     }
   }
 
-  // Recalcul du chemin immédiat s'il y en avait un de configuré
   if (start >= 0 && goal >= 0 && path.length > 0) {
     path = findPathAStar(start, goal);
   }
 }
 
-// Génère un tableau de tuiles aléatoires
 function generateRandomMap(width, height, obstaclePercent = 8) {
   const out = new Array(width * height);
   const blockedProb = obstaclePercent / 100;
   for (let i = 0; i < width * height; i++) {
-    if (Math.random() < blockedProb) out[i] = -1; // Case vide/bloquée
+    if (Math.random() < blockedProb) out[i] = -1;
     else out[i] = Math.floor(Math.random() * 11); 
   }
   return out;
 }
 
-
 // ==========================================
-// 4. ALGORITHME DE PATHFINDING A* (A-STAR) OPTIMISÉ
+// 4. ALGORITHME DE PATHFINDING A*
 // ==========================================
 
-// Heuristique de Manhattan 3D prenant en compte la distance et l'altitude moyenne estimée
 function heuristic(idxA, idxB) {
   const ax = idxA % WORLD_W;
   const ay = Math.floor(idxA / WORLD_W);
@@ -367,19 +420,17 @@ function heuristic(idxA, idxB) {
   const elevB = getTileAverageElevation(bx, by);
   const dZ = Math.abs(elevA - elevB);
 
-  return dX + dY + (dZ * 0.15); // Manhattan + distance verticale pondérée
+  return dX + dY + (dZ * 0.15);
 }
 
-// Récupère les indices des voisins valides d'une cellule avec les coûts (pentes et diagonales)
 function getAdjacentNeighbors(idx) {
   const x = idx % WORLD_W;
   const y = Math.floor(idx / WORLD_W);
   const neighbors = [];
 
-  // Mouvements possibles [dy, dx, coût_géométrique]
   const moves = [
-    [-1, 0, 1], [1, 0, 1], [0, -1, 1], [0, 1, 1],                      // Cardinaux
-    [-1, -1, Math.SQRT2], [-1, 1, Math.SQRT2], [1, -1, Math.SQRT2], [1, 1, Math.SQRT2] // Diagonales
+    [-1, 0, 1], [1, 0, 1], [0, -1, 1], [0, 1, 1],
+    [-1, -1, Math.SQRT2], [-1, 1, Math.SQRT2], [1, -1, Math.SQRT2], [1, 1, Math.SQRT2]
   ];
 
   const currentElev = getTileAverageElevation(x, y);
@@ -390,13 +441,13 @@ function getAdjacentNeighbors(idx) {
 
     if (nx >= 0 && nx < WORLD_W && ny >= 0 && ny < WORLD_H) {
       const neighborIdx = ny * WORLD_W + nx;
-      if (mapData[neighborIdx] === -1) continue; // Ignorer les obstacles
+      if (mapData[neighborIdx] === -1) continue;
 
       const neighborElev = getTileAverageElevation(nx, ny);
       const elevDiff = neighborElev - currentElev;
       let slopePenalty = 0;
       if (elevDiff > 0) {
-        slopePenalty = elevDiff * 0.15; // Pénalité en montée
+        slopePenalty = elevDiff * 0.15;
       }
 
       neighbors.push({
@@ -408,27 +459,23 @@ function getAdjacentNeighbors(idx) {
   return neighbors;
 }
 
-// Algorithme A* extrêmement performant en JS (Pas de dépendance externe)
 function findPathAStar(s, t) {
   const n = WORLD_W * WORLD_H;
   if (s < 0 || s >= n || t < 0 || t >= n) return [];
 
-  // Tableaux de valeurs à plat pour accélérer l'accès mémoire
   const gScore = new Float32Array(n).fill(Infinity);
   const fScore = new Float32Array(n).fill(Infinity);
   const prev = new Int32Array(n).fill(-1);
-  const inOpenSet = new Uint8Array(n); // Masque binaire rapide
+  const inOpenSet = new Uint8Array(n); 
   const closedSet = new Uint8Array(n); 
 
   gScore[s] = 0;
   fScore[s] = heuristic(s, t);
 
-  // File d'attente à priorité simplifiée mais optimisée pour JS (Array plat à tri ciblé)
   const openList = [s];
   inOpenSet[s] = 1;
 
   while (openList.length > 0) {
-    // Extraction rapide de la valeur minimale de fScore
     let bestIndex = 0;
     let bestNode = openList[0];
     let minF = fScore[bestNode];
@@ -444,7 +491,6 @@ function findPathAStar(s, t) {
 
     const current = bestNode;
 
-    // Arrivée trouvée ! Reconstruction du trajet
     if (current === t) {
       const resultPath = [];
       let cur = t;
@@ -455,7 +501,6 @@ function findPathAStar(s, t) {
       return resultPath.reverse();
     }
 
-    // Retirer de la liste
     openList.splice(bestIndex, 1);
     inOpenSet[current] = 0;
     closedSet[current] = 1;
@@ -479,16 +524,13 @@ function findPathAStar(s, t) {
       }
     }
   }
-
-  return []; // Aucun chemin trouvé
+  return [];
 }
 
-
 // ==========================================
-// 5. FONCTIONS DE DESSIN (MOTEUR RENDU OPTIMISÉ PAR FRUSTUM CULLING)
+// 5. FONCTIONS DE DESSIN (MOTEUR RENDU)
 // ==========================================
 
-// Dessine un bâtiment ou bloc 3D étiré vers le haut
 function drawIsometric3DBuilding(x, y, origin, tileId, height) {
   const gridW = WORLD_W + 1;
   const tile = tiles[tileId] || tiles[0];
@@ -518,7 +560,6 @@ function drawIsometric3DBuilding(x, y, origin, tileId, height) {
   const topBottom = { x: flatBottom.x, y: flatBottom.y - h };
   const topLeft   = { x: flatLeft.x,   y: flatLeft.y - h };
 
-  // Face Droite (Ombre moyenne)
   const rightColor = shadeColor(baseColor, -0.2);
   ctx.fillStyle = rightColor;
   ctx.beginPath();
@@ -532,7 +573,6 @@ function drawIsometric3DBuilding(x, y, origin, tileId, height) {
   ctx.lineWidth = 1;
   ctx.stroke();
 
-  // Face Gauche (Ombre forte)
   const leftColor = shadeColor(baseColor, -0.4);
   ctx.fillStyle = leftColor;
   ctx.beginPath();
@@ -544,7 +584,6 @@ function drawIsometric3DBuilding(x, y, origin, tileId, height) {
   ctx.fill();
   ctx.stroke();
 
-  // Toit (Éclairé)
   const lightColor = shadeColor(baseColor, 0.2);
   ctx.fillStyle = lightColor;
   ctx.beginPath();
@@ -557,8 +596,9 @@ function drawIsometric3DBuilding(x, y, origin, tileId, height) {
   ctx.stroke();
 }
 
-// Fonction globale de rendu de la scène (Optimisation Frustum Culling)
 function draw() {
+  const startTime = performance.now(); 
+
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -566,31 +606,26 @@ function draw() {
   
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
 
-  // 1. DÉFINITION DE L'ÉCRAN VISIBLE POUR LE FRUSTUM CULLING
-  // On récupère les limites du canvas (coins haut-gauche et bas-droite) projetées à l'envers sur la grille
   const tl = unprojectPoint(0, 0, origin);
   const tr = unprojectPoint(canvas.width, 0, origin);
   const bl = unprojectPoint(0, canvas.height, origin);
   const br = unprojectPoint(canvas.width, canvas.height, origin);
 
-  // Définition de la boîte de délimitation de la caméra (bounding box) sur la grille isométrique
-  // On ajoute un padding dynamique de sécurité (par exemple 4 tuiles pour les reliefs élevés)
   const padding = 4;
   const minX = Math.max(0, Math.floor(Math.min(tl.x, tr.x, bl.x, br.x) - padding));
   const maxX = Math.min(WORLD_W - 1, Math.ceil(Math.max(tl.x, tr.x, bl.x, br.x) + padding));
   const minY = Math.max(0, Math.floor(Math.min(tl.y, tr.y, bl.y, br.y) - padding));
   const maxY = Math.min(WORLD_H - 1, Math.ceil(Math.max(tl.y, tr.y, bl.y, br.y) + padding));
   
-  // 2. ORDONNANCEMENT PAR CALQUES UNIQUEMENT SUR LA ZONE VISIBLE (FRUSTUM CULLING)
   const tiles_to_draw = [];
   for (let y = minY; y <= maxY; y++) {
     for (let x = minX; x <= maxX; x++) {
       tiles_to_draw.push({ x, y, depth: y + x });
     }
   }
-  // Tri du rendu peintre (Y-Sort)
   tiles_to_draw.sort((a, b) => a.depth - b.depth);
   
+  renderedTilesCount = tiles_to_draw.length; 
   const gridW = WORLD_W + 1;
 
   for (const tile_info of tiles_to_draw) {
@@ -610,35 +645,36 @@ function draw() {
     const ptLeft   = projectPoint(x, y + 1, elevLeft, origin);
 
     if (tile) {
-      // --- MODIFICATION : RENDU AVEC TEXTURE OU COULEUR UNIE ---
-      // Si l'ID est 10 (Pierre) et que la texture est disponible, on dessine la texture
       if (tileId === 10 && testTextureImage) {
         const tw = testTextureImage.width;
         const th = testTextureImage.height;
 
-        // Définition des coordonnées U,V fixes sur l'image source (losange parfait)
         const uTop = tw / 2,     vTop = 0;
         const uRight = tw,       vRight = th / 2;
         const uBottom = tw / 2,  vBottom = th;
         const uLeft = 0,         vLeft = th / 2;
 
-        // Division de la tuile déformée en deux triangles
-        // Triangle 1 (Haut, Droite, Gauche)
+        ctx.fillStyle = tile.color;
+        ctx.beginPath();
+        ctx.moveTo(ptTop.x, ptTop.y);
+        ctx.lineTo(ptRight.x, ptRight.y);
+        ctx.lineTo(ptBottom.x, ptBottom.y);
+        ctx.lineTo(ptLeft.x, ptLeft.y);
+        ctx.closePath();
+        ctx.fill();
+
         drawTextureTriangle(ctx, testTextureImage, 
           ptTop.x, ptTop.y, ptRight.x, ptRight.y, ptLeft.x, ptLeft.y,
-          uTop, vTop, uRight, vRight, uLeft, vLeft
+          uTop, vTop, uRight, vRight, uLeft, vLeft, true
         );
-        // Triangle 2 (Bas, Droite, Gauche)
         drawTextureTriangle(ctx, testTextureImage, 
           ptBottom.x, ptBottom.y, ptRight.x, ptRight.y, ptLeft.x, ptLeft.y,
-          uBottom, vBottom, uRight, vRight, uLeft, vLeft
+          uBottom, vBottom, uRight, vRight, uLeft, vLeft, false
         );
 
-        // --- APPLICATION DE L'OMBRAGE DU RELIEF SUR LA TEXTURE ---
         const slope = (elevTop + elevLeft) - (elevBottom + elevRight);
         if (Math.abs(slope) > 2) {
           ctx.save();
-          // Masque de la tuile pour n'appliquer l'ombre que sur celle-ci
           ctx.beginPath();
           ctx.moveTo(ptTop.x, ptTop.y);
           ctx.lineTo(ptRight.x, ptRight.y);
@@ -647,20 +683,18 @@ function draw() {
           ctx.closePath();
           ctx.clip();
 
-          // Mode de fusion Multiply pour intégrer l'ombre à la texture sans effacer ses détails
           ctx.globalCompositeOperation = 'multiply';
           if (slope > 2) {
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.15)'; // Éclaircissement
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.15)'; 
           } else {
             const darkness = Math.min(0.4, Math.abs(slope) * 0.006);
-            ctx.fillStyle = `rgba(0, 0, 0, ${darkness})`; // Assombrissement
+            ctx.fillStyle = `rgba(0, 0, 0, ${darkness})`; 
           }
           ctx.fill();
           ctx.restore();
         }
 
       } else {
-        // Rendu classique à plat couleur unie si pas texturé
         const slope = (elevTop + elevLeft) - (elevBottom + elevRight);
         let fillColor = tile.color;
         if (slope > 2) {
@@ -680,7 +714,6 @@ function draw() {
         ctx.fill();
       }
 
-      // Bordures de tuiles identiques
       ctx.strokeStyle = 'rgba(0,0,0,0.15)';
       ctx.lineWidth = 1;
       ctx.stroke();
@@ -698,9 +731,53 @@ function draw() {
       ctx.closePath();
       ctx.fill();
     }
+
+    // --- RENDU DES OBJETS EN FAUSSE 3D ADAPTÉE AU RELIEF ---
+    const obj = mapObjects[idx];
+    if (obj && objectTypes[obj.type]) {
+      const typeCfg = objectTypes[obj.type];
+      
+      // Altitude moyenne sous l'objet
+      const elevAverage = (elevTop + elevRight + elevBottom + elevLeft) / 4;
+      const centerPt = projectPoint(x + 0.5, y + 0.5, elevAverage, origin);
+      
+      const objX = centerPt.x + (obj.offsetX * zoom);
+      const objY = centerPt.y + (obj.offsetY * zoom);
+      
+      ctx.save();
+      ctx.translate(objX, objY);
+
+      // Calcul des inclinaisons X et Y du terrain sur la tuile
+      const diffX = (elevRight + elevBottom) - (elevTop + elevLeft);
+      const diffY = (elevBottom + elevLeft) - (elevTop + elevRight);
+      
+      if (typeCfg.alignWithSlope) {
+        // Option A : Déformation/Rotation pour s'aligner parallèlement à la pente
+        const angleRotation = Math.atan2(diffX * (TILE_H / 2), TILE_W) * 0.45;
+        ctx.rotate(angleRotation);
+        
+        // Simulation d'une compression selon la sévérité de la pente Y
+        const scaleY = 1 - Math.min(0.25, Math.abs(diffY) * 0.008);
+        ctx.scale(1, scaleY);
+      } else {
+        // Option B : Objet rigide (Rocher) -> On dessine d'abord son ombre déformée au sol
+        ctx.save();
+        ctx.scale(1.2, 0.5); // Écrasement pour faire l'ellipse de l'ombre
+        // Décalage léger de l'ombre en fonction de la pente
+        ctx.translate(diffX * 0.2 * zoom, diffY * 0.1 * zoom);
+        ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
+        ctx.beginPath();
+        ctx.arc(0, 0, obj.size * zoom, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+      
+      // Exécution de la fonction de dessin (vectorielle ou image future)
+      typeCfg.draw(ctx, obj.size * zoom);
+      ctx.restore();
+    }
   }
   
-  // 3. AFFICHAGE DES RECOUVREMENTS DÉPART / ARRIVÉE (Si visible)
   for (const tile_info of tiles_to_draw) {
     const { x, y } = tile_info;
     const idx = y * WORLD_W + x;
@@ -729,12 +806,9 @@ function draw() {
     }
   }
   
-  // 4. DESSIN DU CHEMIN DE L'ALGORITHME A*
   if (path && path.length) {
     for (const p of path) {
       const x = p % WORLD_W, y = Math.floor(p / WORLD_W);
-      
-      // On ne dessine le segment du chemin que s'il est dans la zone visible
       if (x < minX || x > maxX || y < minY || y > maxY) continue;
       
       const elevTop    = elevationGrid[y * gridW + x] || 0;
@@ -757,8 +831,50 @@ function draw() {
       ctx.fill();
     }
   }
+
+  frameTime = performance.now() - startTime;
+  renderPerformanceHUD();
 }
 
+function renderPerformanceHUD() {
+  if (!lastCalledTime) {
+    lastCalledTime = performance.now();
+    fps = 0;
+  } else {
+    let delta = (performance.now() - lastCalledTime) / 1000;
+    lastCalledTime = performance.now();
+    let currentFps = Math.round(1 / delta);
+    
+    fpsDisplayInterval++;
+    if (fpsDisplayInterval >= 5) { 
+      fps = currentFps;
+      fpsDisplayInterval = 0;
+    }
+  }
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0); 
+
+  ctx.fillStyle = "rgba(18, 14, 10, 0.85)";
+  ctx.strokeStyle = "#8b7355";
+  ctx.lineWidth = 1.5;
+  ctx.fillRect(15, 15, 190, 85);
+  ctx.strokeRect(15, 15, 190, 85);
+
+  ctx.font = "bold 12px monospace";
+  ctx.textBaseline = "top";
+
+  ctx.fillStyle = fps < 30 ? "#ff4a4a" : fps < 55 ? "#ffcc00" : "#00ff66";
+  ctx.fillText(`⚡ ${fps} FPS`, 25, 23);
+
+  ctx.fillStyle = frameTime > 16 ? "#ff7c7c" : "#e2d1b7";
+  ctx.fillText(`⏱️ Frame: ${frameTime.toFixed(2)} ms`, 25, 43);
+
+  ctx.fillStyle = "#c9a961";
+  ctx.fillText(`🧱 Tuiles: ${renderedTilesCount}`, 25, 63);
+
+  ctx.restore();
+}
 
 // ==========================================
 // 6. GESTION DE L'INTERFACE UTILISATEUR (UI)
@@ -788,7 +904,7 @@ async function toggleMapOnlyMode() {
     }
   }
   resizeCanvas();
-  draw();
+  triggerRender();
 }
 
 function updateInfo() {
@@ -933,7 +1049,7 @@ function renderTilesPalette() {
     colorInput.addEventListener('change', (e) => {
       tiles[i].color = e.target.value;
       colorBox.style.background = e.target.value;
-      draw();
+      triggerRender();
     });
     
     const heightLabel = document.createElement('label');
@@ -949,7 +1065,7 @@ function renderTilesPalette() {
     heightInput.addEventListener('change', (e) => {
       tiles[i].height = Math.max(0, Math.min(5, parseInt(e.target.value, 10) || 0));
       e.target.value = tiles[i].height;
-      draw();
+      triggerRender();
     });
     
     heightLabel.appendChild(heightInput);
@@ -963,15 +1079,15 @@ function renderTilesPalette() {
   refreshModeUI();
 }
 
-
 // ==========================================
-// 7. ÉVÉNEMENTS UNIFIÉS (SOURIS, TACTILE, CLAVIER)
+// 7. ÉVÉNEMENTS UNIFIÉS (SOURIS, TACTILE)
 // ==========================================
 
 function handleActionAtCell(cell, button) {
   if (editorMode === "paint") {
     if (button === 0) { 
       mapData[cell] = selectedTileId;
+      if (selectedTileId !== 0) mapObjects[cell] = null;
     }
   } 
   else if (editorMode === "elevation") {
@@ -988,68 +1104,60 @@ function handleActionAtCell(cell, button) {
   }
 }
 
-// 1. Appui (Souris ou Tactile)
 canvas.addEventListener('pointerdown', (e) => {
   activePointers.push(e);
   canvas.setPointerCapture(e.pointerId);
 
-  // CLIC DROIT SOURIS (Définir la cible du chemin)
   if (e.pointerType === 'mouse' && e.button === 2) {
     const cell = canvasToCell(e.clientX, e.clientY);
     if (cell !== -1) {
       handleActionAtCell(cell, 2);
-      draw();
+      triggerRender();
       updateInfo();
     }
     return;
   }
 
-  // TACTILE : Lancer le timer pour simuler le clic droit (appui long)
   if (e.pointerType === 'touch') {
     touchTimer = setTimeout(() => {
       const cell = canvasToCell(e.clientX, e.clientY);
       if (cell !== -1) {
-        handleActionAtCell(cell, 2); // Simule le clic droit pour l'arrivée
-        draw();
+        handleActionAtCell(cell, 2); 
+        triggerRender();
         updateInfo();
-        isPanning = false; // On annule le mouvement en glissant
+        isPanning = false; 
       }
     }, LONG_PRESS_DELAY);
   }
 
-  // Action d'édition au clic (avec le bouton principal de la souris ou à un seul doigt)
   if (activePointers.length === 1 && e.button !== 2) {
     const cell = canvasToCell(e.clientX, e.clientY);
     if (cell !== -1) {
       isMouseDown = true;
       lastPaintedCell = cell;
       handleActionAtCell(cell, 0);
-      draw();
+      triggerRender();
       updateInfo();
     } else {
-      // Si on clique dans le vide, on active le déplacement caméra (panoramique)
       isPanning = true;
       startPanX = e.clientX - panX;
       startPanY = e.clientY - panY;
       canvas.style.cursor = 'grabbing';
     }
   } 
-  // PINCEMENT TACTILE (Zoom à 2 doigts)
   else if (activePointers.length === 2) {
     isMouseDown = false;
     isPanning = false;
-    clearTimeout(touchTimer); // Annule l'appui long si on commence à pincer
+    clearTimeout(touchTimer); 
     initialPinchDistance = getDistance(activePointers[0], activePointers[1]);
     initialZoom = zoom;
   }
 });
 
-// 2. Mouvement (Souris ou Tactile)
 canvas.addEventListener('pointermove', (e) => {
   const index = activePointers.findIndex(p => p.pointerId === e.pointerId);
   if (index !== -1) activePointers[index] = e;
 
-  // Si on bouge trop l'écran, on annule l'appui long tactile
   if (e.pointerType === 'touch' && activePointers.length === 1) {
     const deltaX = Math.abs(e.clientX - (startPanX + panX));
     const deltaY = Math.abs(e.clientY - (startPanY + panY));
@@ -1058,23 +1166,20 @@ canvas.addEventListener('pointermove', (e) => {
     }
   }
 
-  // Action d'édition continue (dessiner/ajuster le relief en glissant)
   if (isMouseDown && activePointers.length === 1 && editorMode !== "pathfinding") {
     const cell = canvasToCell(e.clientX, e.clientY);
     if (cell !== -1 && cell !== lastPaintedCell) {
       lastPaintedCell = cell;
       handleActionAtCell(cell, 0);
-      draw();
+      triggerRender();
       updateInfo();
     }
   } 
-  // Glissement de la caméra (Panoramique avec 1 doigt ou souris)
   else if (isPanning && activePointers.length === 1) {
     panX = e.clientX - startPanX;
     panY = e.clientY - startPanY;
-    requestAnimationFrame(draw);
+    triggerRender();
   }
-  // Zoom au pincement (Mobile à deux doigts)
   else if (activePointers.length === 2) {
     const currentDistance = getDistance(activePointers[0], activePointers[1]);
     if (initialPinchDistance > 0) {
@@ -1091,12 +1196,11 @@ canvas.addEventListener('pointermove', (e) => {
       panX = (midX - rect.left) / scale - worldX * zoom;
       panY = (midY - rect.top) / scale - worldY * zoom;
       
-      requestAnimationFrame(draw);
+      triggerRender();
     }
   }
 });
 
-// 3. Fin du geste (Relâchement souris ou tactile)
 function handlePointerUp(e) {
   clearTimeout(touchTimer);
   isMouseDown = false;
@@ -1114,7 +1218,6 @@ function handlePointerUp(e) {
 canvas.addEventListener('pointerup', handlePointerUp);
 canvas.addEventListener('pointercancel', handlePointerUp);
 
-// 4. ZOOM À LA MOLETTE SOURIS (Ordinateurs)
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   
@@ -1135,42 +1238,39 @@ canvas.addEventListener('wheel', (e) => {
   panX = mouseX - worldX * zoom;
   panY = mouseY - worldY * zoom;
 
-  requestAnimationFrame(draw); 
+  triggerRender(); 
 }, { passive: false });
 
-// Bloquer le menu contextuel natif du clic droit sur la grille
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 
-// Événements Clavier (Flèches directionnelles, Espace, R, F)
 document.addEventListener('keydown', async (e) => {
   if (e.code === 'KeyF') {
     await toggleMapOnlyMode();
     return;
   }
   if (e.code === 'Space') {
-    if (start < 0 || goal < 0) return alert('Définir départ et arrivée (Clic gauche ou tape rapide pour départ / Clic droit ou appui long pour arrivée)');
+    if (start < 0 || goal < 0) return alert('Définir départ et arrivée');
     path = findPathAStar(start, goal);
-    draw();
+    triggerRender();
   }
-  if (e.code === 'ArrowUp') { panY += 30; draw(); }
-  if (e.code === 'ArrowDown') { panY -= 30; draw(); }
-  if (e.code === 'ArrowLeft') { panX += 30; draw(); }
-  if (e.code === 'ArrowRight') { panX -= 30; draw(); }
-  if (e.key === 'r' || e.key === 'R') { start = -1; goal = -1; path = []; draw(); }
+  if (e.code === 'ArrowUp') { panY += 30; triggerRender(); }
+  if (e.code === 'ArrowDown') { panY -= 30; triggerRender(); }
+  if (e.code === 'ArrowLeft') { panX += 30; triggerRender(); }
+  if (e.code === 'ArrowRight') { panX -= 30; triggerRender(); }
+  if (e.key === 'r' || e.key === 'R') { start = -1; goal = -1; path = []; triggerRender(); }
   updateInfo();
 });
 
-
 // ==========================================
-// 8. BOUTONS ET ACTIONS DE L'INTERFACE
+// 8. ACTIONS DES BOUTONS DE L'INTERFACE
 // ==========================================
 
-document.getElementById('btnReset').addEventListener('click', () => { start = -1; goal = -1; path = []; draw(); });
+document.getElementById('btnReset').addEventListener('click', () => { start = -1; goal = -1; path = []; triggerRender(); });
 
 document.getElementById('btnCompute').addEventListener('click', () => {
-  if (start < 0 || goal < 0) return alert('Définir départ et arrivée (Passez en mode "Chemin" pour les placer)');
+  if (start < 0 || goal < 0) return alert('Définir départ et arrivée');
   path = findPathAStar(start, goal);
-  draw(); 
+  triggerRender(); 
   updateInfo();
 });
 
@@ -1186,46 +1286,29 @@ document.getElementById('btnCreateMap').addEventListener('click', () => {
   WORLD_W = w; WORLD_H = h;
   mapData = generateRandomMap(WORLD_W, WORLD_H, obstacleProb);
   elevationGrid = generateElevation(WORLD_W, WORLD_H);
+  generateMapObjects(); 
   start = -1; goal = -1; path = [];
   resizeCanvas(); 
-  draw(); 
+  triggerRender(); 
   updateInfo(); 
   renderTilesPalette();
 });
 
 document.getElementById('btnRegenerate').addEventListener('click', () => {
   const obstacleProb = parseInt(document.getElementById('inputObstacleProb').value, 10);
-  if (isNaN(obstacleProb)) return alert('Valeur invalide pour obstacles');
+  if (isNaN(obstacleProb)) return alert('Valeur invalide');
   mapData = generateRandomMap(WORLD_W, WORLD_H, obstacleProb);
   elevationGrid = generateElevation(WORLD_W, WORLD_H);
+  generateMapObjects(); 
   start = -1; goal = -1; path = [];
-  draw(); 
+  triggerRender(); 
   updateInfo(); 
   renderTilesPalette();
 });
 
-
 // ==========================================
-// 9. CHARGEMENT ET REDIMENSIONNEMENT DU CANVAS
+// 9. CHARGEMENT ET INITIALISATION
 // ==========================================
-
-async function loadText(name) {
-  const r = await fetch(name);
-  return await r.text();
-}
-
-function parseMap(text) {
-  const parts = text.trim().split(/\s+/).map(Number);
-  const rows = WORLD_H, cols = WORLD_W;
-  const out = new Array(rows * cols).fill(-1);
-  for (let i = 0; i < rows; i++) {
-    for (let j = 0; j < cols; j++) {
-      const idx = i * cols + j;
-      out[idx] = (idx < parts.length) ? parts[idx] : -1;
-    }
-  }
-  return out;
-}
 
 function resizeCanvas() {
   const availW = canvasContainer.clientWidth - 24; 
@@ -1235,18 +1318,17 @@ function resizeCanvas() {
   canvas.height = availH;
   
   scale = Math.min(availW / BASE_WIDTH, availH / BASE_HEIGHT);
-  
-  draw();
+  triggerRender();
 }
 
 window.addEventListener('resize', resizeCanvas);
 
-// Initialisation globale au chargement de la page
 window.addEventListener('DOMContentLoaded', () => {
   WORLD_W = 20;
   WORLD_H = 20;
   mapData = generateRandomMap(WORLD_W, WORLD_H, 8);
   elevationGrid = generateElevation(WORLD_W, WORLD_H);
+  generateMapObjects(); 
   
   resizeCanvas();
   renderTilesPalette();
