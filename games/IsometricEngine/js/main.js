@@ -1,7 +1,8 @@
-import { gameState, uiElements, tiles, BASE_WIDTH, BASE_HEIGHT, TILE_W, TILE_H } from './state.js';
+import { gameState, uiElements, tiles, BASE_WIDTH, BASE_HEIGHT } from './state.js';
 import { findPathAStar } from './math.js';
 import { initInputEvents, renderTilesPalette } from './input.js';
-import { draw, drawTextureTriangle } from './engine.js';
+// CORRECTION : On importe maintenant preRenderMapCache depuis engine.js
+import { draw, preRenderMapCache } from './engine.js';
 
 export function triggerRender() { requestAnimationFrame(draw); }
 
@@ -13,7 +14,7 @@ window.toggleSection = function(sectionId) {
 export function isMapOnlyMode() { return gameState.mapOnlyMode || document.body.classList.contains('map-only'); }
 
 export async function toggleMapOnlyMode() {
-  gameState.mapOnlyMode = !gameState.mapOnlyMode;
+  gameState.mapMode = !gameState.mapOnlyMode;
   document.body.classList.toggle('map-only', gameState.mapOnlyMode);
   if (gameState.mapOnlyMode) {
     uiElements.mapOnlyButton.textContent = 'Sortir carte';
@@ -78,96 +79,6 @@ export function resizeCanvas() {
   gameState.scale = Math.min(availW / BASE_WIDTH, availH / BASE_HEIGHT); triggerRender();
 }
 
-/**
- * GÉNÉRATION DU CACHE DES TUILES DE TERRAIN TEXTURÉES
- */
-export function preRenderMapCache() {
-  if (!gameState.testTextureImage) return;
-
-  // Initialisation propre de la structure de stockage
-  gameState.tileCache = {};
-  
-  const gridW = gameState.WORLD_W + 1;
-  
-  // On dimensionne le sous-canvas par rapport à la taille théorique d'une tuile plate (TILE_W)
-  // en ajoutant une marge pour accueillir les dénivelés verticaux extrêmes.
-  const bufferW = TILE_W;
-  const bufferH = TILE_H + 120; 
-  const offsetY = 50; // Décalage vertical de sécurité appliqué en interne
-
-  for (let y = 0; y < gameState.WORLD_H; y++) {
-    for (let x = 0; x < gameState.WORLD_W; x++) {
-      const idx = y * gameState.WORLD_W + x;
-      const tileId = gameState.mapData[idx];
-      const tile = tileId >= 0 ? tiles[tileId] : null;
-
-      // Seul l'ID 10 exploite ce traitement matriciel lourd
-      if (tileId !== 10 || !tile) continue;
-
-      const elevTop    = gameState.elevationGrid[y * gridW + x] || 0;
-      const elevRight  = gameState.elevationGrid[y * gridW + (x + 1)] || 0;
-      const elevBottom = gameState.elevationGrid[(y + 1) * gridW + (x + 1)] || 0;
-      const elevLeft   = gameState.elevationGrid[(y + 1) * gridW + x] || 0;
-
-      // Définition de la clé unique décrivant fidèlement cette géométrie de pente
-      const slopeKey = `${tileId}_${elevTop}_${elevRight}_${elevBottom}_${elevLeft}`;
-
-      // Si cette configuration a déjà été traitée sur une autre case de la carte, on l'ignore
-      if (gameState.tileCache[slopeKey]) continue;
-
-      // Instanciation de notre surface volatile hors-écran
-      const offCanvas = document.createElement('canvas');
-      offCanvas.width = bufferW;
-      offCanvas.height = bufferH;
-      const offCtx = offCanvas.getContext('2d');
-
-      const minElev = Math.min(elevTop, elevRight, elevBottom, elevLeft);
-
-      // Reconstruction des 4 points à l'intérieur du repère du sous-canvas (0,0 en haut à gauche)
-      // On soustrait l'altitude minimale locale pour ramener la tuile au ras de son buffer
-      const localTop    = { x: TILE_W / 2, y: offsetY - (elevTop - minElev) };
-      const localRight  = { x: TILE_W,     y: offsetY + (TILE_H / 2) - (elevRight - minElev) };
-      const localBottom = { x: TILE_W / 2, y: offsetY + TILE_H - (elevBottom - minElev) };
-      const localLeft   = { x: 0,          y: offsetY + (TILE_H / 2) - (elevLeft - minElev) };
-
-      const tw = gameState.testTextureImage.width;
-      const th = gameState.testTextureImage.height;
-      const uTop = tw / 2, vTop = 0; const uRight = tw, vRight = th / 2;
-      const uBottom = tw / 2, vBottom = th; const uLeft = 0, vLeft = th / 2;
-
-      // Couleur de base unie sous la texture par sécurité
-      offCtx.fillStyle = tile.color;
-      offCtx.beginPath();
-      offCtx.moveTo(localTop.x, localTop.y);
-      offCtx.lineTo(localRight.x, localRight.y);
-      offCtx.lineTo(localBottom.x, localBottom.y);
-      offCtx.lineTo(localLeft.x, localLeft.y);
-      offCtx.closePath();
-      offCtx.fill();
-
-      // Plaquage géométrique précis des textures via l'algorithme affine natif d'engine.js
-      drawTextureTriangle(offCtx, gameState.testTextureImage, localTop.x, localTop.y, localRight.x, localRight.y, localLeft.x, localLeft.y, uTop, vTop, uRight, vRight, uLeft, vLeft, true);
-      drawTextureTriangle(offCtx, gameState.testTextureImage, localBottom.x, localBottom.y, localRight.x, localRight.y, localLeft.x, localLeft.y, uBottom, vBottom, uRight, vRight, uLeft, vLeft, false);
-
-      // Calcul et application des ombrages de reliefs (conservé d'engine.js)
-      const slope = (elevTop + elevLeft) - (elevBottom + elevRight);
-      if (Math.abs(slope) > 2) {
-        offCtx.save(); offCtx.beginPath(); offCtx.moveTo(localTop.x, localTop.y);
-        offCtx.lineTo(localRight.x, localRight.y); offCtx.lineTo(localBottom.x, localBottom.y);
-        offCtx.lineTo(localLeft.x, localLeft.y); offCtx.closePath(); offCtx.clip();
-        offCtx.globalCompositeOperation = 'multiply';
-        if (slope > 2) offCtx.fillStyle = 'rgba(255, 255, 255, 0.15)'; 
-        else { const darkness = Math.min(0.4, Math.abs(slope) * 0.006); offCtx.fillStyle = `rgba(0, 0, 0, ${darkness})`; }
-        offCtx.fill(); offCtx.restore();
-      }
-
-      // Sauvegarde du canvas pré-généré dans le dictionnaire
-      gameState.tileCache[slopeKey] = offCanvas;
-    }
-  }
-}
-
-// Initialisation des écouteurs d'interface graphique
 document.getElementById('btnReset').addEventListener('click', () => { gameState.start = -1; gameState.goal = -1; gameState.path = []; triggerRender(); });
 document.getElementById('btnCompute').addEventListener('click', () => {
   if (gameState.start < 0 || gameState.goal < 0) return alert('Définir départ et arrivée');
@@ -187,7 +98,7 @@ document.getElementById('btnCreateMap').addEventListener('click', () => {
   gameState.elevationGrid = generateElevation(gameState.WORLD_W, gameState.WORLD_H);
   generateMapObjects(); gameState.start = -1; gameState.goal = -1; gameState.path = [];
   
-  preRenderMapCache(); // <-- Rafraîchissement du cache sur nouvelle map
+  preRenderMapCache(); 
   resizeCanvas(); triggerRender(); updateInfo(); renderTilesPalette();
 });
 
@@ -198,7 +109,7 @@ document.getElementById('btnRegenerate').addEventListener('click', () => {
   gameState.elevationGrid = generateElevation(gameState.WORLD_W, gameState.WORLD_H);
   generateMapObjects(); gameState.start = -1; gameState.goal = -1; gameState.path = [];
   
-  preRenderMapCache(); // <-- Rafraîchissement du cache sur régénération
+  preRenderMapCache(); 
   triggerRender(); updateInfo(); renderTilesPalette();
 });
 
@@ -214,7 +125,7 @@ window.addEventListener('DOMContentLoaded', () => {
   gameState.testTextureImage.src = 'tales.png';
   gameState.testTextureImage.onload = () => {
     gameState.tilePattern = uiElements.ctx.createPattern(gameState.testTextureImage, 'repeat');
-    preRenderMapCache(); // <-- Pré-génération initiale dès que l'image est chargée
+    preRenderMapCache(); 
     triggerRender();
   };
 
