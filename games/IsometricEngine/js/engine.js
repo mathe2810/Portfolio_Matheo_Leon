@@ -1,5 +1,79 @@
-import { gameState, uiElements, tiles, objectTypes } from './state.js';
-import { projectPoint, unprojectPoint, shadeColor } from './math.js';
+import { gameState, uiElements, tiles, objectTypes, TILE_W, TILE_H } from './state.js';
+import { projectPoint, unprojectPoint, shadeColor, findPathAStar } from './math.js';
+
+/**
+ * GÉNÉRATION DU CACHE DES TUILES DE TERRAIN TEXTURÉES
+ */
+export function preRenderMapCache() {
+  if (!gameState.testTextureImage) return;
+
+  gameState.tileCache = {};
+  const gridW = gameState.WORLD_W + 1;
+  const bufferW = TILE_W;
+  const bufferH = TILE_H + 120; 
+  const offsetY = 50; 
+
+  for (let y = 0; y < gameState.WORLD_H; y++) {
+    for (let x = 0; x < gameState.WORLD_W; x++) {
+      const idx = y * gameState.WORLD_W + x;
+      const tileId = gameState.mapData[idx];
+      const tile = tileId >= 0 ? tiles[tileId] : null;
+
+      if (tileId !== 10 || !tile) continue;
+
+      const elevTop    = gameState.elevationGrid[y * gridW + x] || 0;
+      const elevRight  = gameState.elevationGrid[y * gridW + (x + 1)] || 0;
+      const elevBottom = gameState.elevationGrid[(y + 1) * gridW + (x + 1)] || 0;
+      const elevLeft   = gameState.elevationGrid[(y + 1) * gridW + x] || 0;
+
+      const slopeKey = `${tileId}_${elevTop}_${elevRight}_${elevBottom}_${elevLeft}`;
+
+      if (gameState.tileCache[slopeKey]) continue;
+
+      const offCanvas = document.createElement('canvas');
+      offCanvas.width = bufferW;
+      offCanvas.height = bufferH;
+      const offCtx = offCanvas.getContext('2d');
+
+      const minElev = Math.min(elevTop, elevRight, elevBottom, elevLeft);
+
+      const localTop    = { x: TILE_W / 2, y: offsetY - (elevTop - minElev) };
+      const localRight  = { x: TILE_W,     y: offsetY + (TILE_H / 2) - (elevRight - minElev) };
+      const localBottom = { x: TILE_W / 2, y: offsetY + TILE_H - (elevBottom - minElev) };
+      const localLeft   = { x: 0,          y: offsetY + (TILE_H / 2) - (elevLeft - minElev) };
+
+      const tw = gameState.testTextureImage.width;
+      const th = gameState.testTextureImage.height;
+      const uTop = tw / 2, vTop = 0; const uRight = tw, vRight = th / 2;
+      const uBottom = tw / 2, vBottom = th; const uLeft = 0, vLeft = th / 2;
+
+      offCtx.fillStyle = tile.color;
+      offCtx.beginPath();
+      offCtx.moveTo(localTop.x, localTop.y);
+      offCtx.lineTo(localRight.x, localRight.y);
+      offCtx.lineTo(localBottom.x, localBottom.y);
+      offCtx.lineTo(localLeft.x, localLeft.y);
+      offCtx.closePath();
+      offCtx.fill();
+
+      drawTextureTriangle(offCtx, gameState.testTextureImage, localTop.x, localTop.y, localRight.x, localRight.y, localLeft.x, localLeft.y, uTop, vTop, uRight, vRight, uLeft, vLeft, true);
+      drawTextureTriangle(offCtx, gameState.testTextureImage, localBottom.x, localBottom.y, localRight.x, localRight.y, localLeft.x, localLeft.y, uBottom, vBottom, uRight, vRight, uLeft, vLeft, false);
+
+      const slope = (elevTop + elevLeft) - (elevBottom + elevRight);
+      if (Math.abs(slope) > 2) {
+        offCtx.save(); offCtx.beginPath(); offCtx.moveTo(localTop.x, localTop.y);
+        offCtx.lineTo(localRight.x, localRight.y); offCtx.lineTo(localBottom.x, localBottom.y);
+        offCtx.lineTo(localLeft.x, localLeft.y); offCtx.closePath(); offCtx.clip();
+        offCtx.globalCompositeOperation = 'multiply';
+        if (slope > 2) offCtx.fillStyle = 'rgba(255, 255, 255, 0.15)'; 
+        else { const darkness = Math.min(0.4, Math.abs(slope) * 0.006); offCtx.fillStyle = `rgba(0, 0, 0, ${darkness})`; }
+        offCtx.fill(); offCtx.restore();
+      }
+
+      gameState.tileCache[slopeKey] = offCanvas;
+    }
+  }
+}
 
 export function drawTextureTriangle(ctx, img, x0, y0, x1, y1, x2, y2, u0, v0, u1, v1, u2, v2, isUpperTriangle = true) {
   ctx.save();
@@ -112,90 +186,14 @@ export function draw() {
   const minY = Math.max(0, Math.floor(Math.min(tl.y, tr.y, bl.y, br.y) - padding));
   const maxY = Math.min(gameState.WORLD_H - 1, Math.ceil(Math.max(tl.y, tr.y, bl.y, br.y) + padding));
   
-  const tiles_to_draw = [];
-  for (let y = minY; y <= maxY; y++) { for (let x = minX; x <= maxX; x++) { tiles_to_draw.push({ x, y, depth: y + x }); } }
-  tiles_to_draw.sort((a, b) => a.depth - b.depth);
-  gameState.renderedTilesCount = tiles_to_draw.length; const gridW = gameState.WORLD_W + 1;
+  let counter = 0;
+  const gridW = gameState.WORLD_W + 1;
 
-  for (let i = 0; i < tiles_to_draw.length; i++) {
-    const { x, y } = tiles_to_draw[i]; const idx = y * gameState.WORLD_W + x;
-    const tileId = gameState.mapData[idx]; const tile = tileId >= 0 ? tiles[tileId] : null;
-    const elevTop    = gameState.elevationGrid[y * gridW + x] || 0;
-    const elevRight  = gameState.elevationGrid[y * gridW + (x + 1)] || 0;
-    const elevBottom = gameState.elevationGrid[(y + 1) * gridW + (x + 1)] || 0;
-    const elevLeft   = gameState.elevationGrid[(y + 1) * gridW + x] || 0;
-
-    const ptTop    = projectPoint(x, y, elevTop); const ptRight  = projectPoint(x + 1, y, elevRight);
-    const ptBottom = projectPoint(x + 1, y + 1, elevBottom); const ptLeft   = projectPoint(x, y + 1, elevLeft);
-
-    if (tile) {
-      if (tileId === 10 && gameState.testTextureImage) {
-        const tw = gameState.testTextureImage.width; const th = gameState.testTextureImage.height;
-        const uTop = tw / 2, vTop = 0; const uRight = tw, vRight = th / 2;
-        const uBottom = tw / 2, vBottom = th; const uLeft = 0, vLeft = th / 2;
-
-        uiElements.ctx.fillStyle = tile.color; uiElements.ctx.beginPath();
-        uiElements.ctx.moveTo(ptTop.x, ptTop.y); uiElements.ctx.lineTo(ptRight.x, ptRight.y);
-        uiElements.ctx.lineTo(ptBottom.x, ptBottom.y); uiElements.ctx.lineTo(ptLeft.x, ptLeft.y);
-        uiElements.ctx.closePath(); uiElements.ctx.fill();
-
-        drawTextureTriangle(uiElements.ctx, gameState.testTextureImage, ptTop.x, ptTop.y, ptRight.x, ptRight.y, ptLeft.x, ptLeft.y, uTop, vTop, uRight, vRight, uLeft, vLeft, true);
-        drawTextureTriangle(uiElements.ctx, gameState.testTextureImage, ptBottom.x, ptBottom.y, ptRight.x, ptRight.y, ptLeft.x, ptLeft.y, uBottom, vBottom, uRight, vRight, uLeft, vLeft, false);
-
-        const slope = (elevTop + elevLeft) - (elevBottom + elevRight);
-        if (Math.abs(slope) > 2) {
-          uiElements.ctx.save(); uiElements.ctx.beginPath(); uiElements.ctx.moveTo(ptTop.x, ptTop.y);
-          uiElements.ctx.lineTo(ptRight.x, ptRight.y); uiElements.ctx.lineTo(ptBottom.x, ptBottom.y);
-          uiElements.ctx.lineTo(ptLeft.x, ptLeft.y); uiElements.ctx.closePath(); uiElements.ctx.clip();
-          uiElements.ctx.globalCompositeOperation = 'multiply';
-          if (slope > 2) uiElements.ctx.fillStyle = 'rgba(255, 255, 255, 0.15)'; 
-          else { const darkness = Math.min(0.4, Math.abs(slope) * 0.006); uiElements.ctx.fillStyle = `rgba(0, 0, 0, ${darkness})`; }
-          uiElements.ctx.fill(); uiElements.ctx.restore();
-        }
-      } else {
-        const slope = (elevTop + elevLeft) - (elevBottom + elevRight);
-        let fillColor = tile.color;
-        if (slope > 2) fillColor = shadeColor(tile.color, 0.15); 
-        else if (slope < -2) { const darkness = Math.max(-0.4, slope * 0.006); fillColor = shadeColor(tile.color, darkness); }
-        uiElements.ctx.fillStyle = fillColor; uiElements.ctx.beginPath();
-        uiElements.ctx.moveTo(ptTop.x, ptTop.y); uiElements.ctx.lineTo(ptRight.x, ptRight.y);
-        uiElements.ctx.lineTo(ptBottom.x, ptBottom.y); uiElements.ctx.lineTo(ptLeft.x, ptLeft.y);
-        uiElements.ctx.closePath(); uiElements.ctx.fill();
-      }
-      uiElements.ctx.strokeStyle = 'rgba(0,0,0,0.15)'; uiElements.ctx.lineWidth = 1; uiElements.ctx.stroke();
-      if (tile.height > 0) drawIsometric3DBuilding(x, y, tileId, tile.height);
-    } else {
-      uiElements.ctx.fillStyle = '#1a1410'; uiElements.ctx.beginPath();
-      uiElements.ctx.moveTo(ptTop.x, ptTop.y); uiElements.ctx.lineTo(ptRight.x, ptRight.y);
-      uiElements.ctx.lineTo(ptBottom.x, ptBottom.y); uiElements.ctx.lineTo(ptLeft.x, ptLeft.y);
-      uiElements.ctx.closePath(); uiElements.ctx.fill();
-    }
-
-    const obj = gameState.mapObjects[idx];
-    if (obj && objectTypes[obj.type]) {
-      const typeCfg = objectTypes[obj.type];
-      const elevAverage = (elevTop + elevRight + elevBottom + elevLeft) / 4;
-      const centerPt = projectPoint(x + 0.5, y + 0.5, elevAverage);
-      const objX = centerPt.x + (obj.offsetX * gameState.zoom); const objY = centerPt.y + (obj.offsetY * gameState.zoom);
-      
-      uiElements.ctx.save(); uiElements.ctx.translate(objX, objY);
-      const diffX = (elevRight + elevBottom) - (elevTop + elevLeft); const diffY = (elevBottom + elevLeft) - (elevTop + elevRight);
-      
-      if (typeCfg.alignWithSlope) {
-        const angleRotation = Math.atan2(diffX * (54 / 2), 94) * 0.45; uiElements.ctx.rotate(angleRotation);
-        const scaleY = 1 - Math.min(0.25, Math.abs(diffY) * 0.008); uiElements.ctx.scale(1, scaleY);
-      } else {
-        uiElements.ctx.save(); uiElements.ctx.scale(1.2, 0.5); uiElements.ctx.translate(diffX * 0.2 * gameState.zoom, diffY * 0.1 * gameState.zoom);
-        uiElements.ctx.fillStyle = "rgba(0, 0, 0, 0.25)"; uiElements.ctx.beginPath(); uiElements.ctx.arc(0, 0, obj.size * gameState.zoom, 0, Math.PI * 2);
-        uiElements.ctx.fill(); uiElements.ctx.restore();
-      }
-      typeCfg.draw(uiElements.ctx, obj.size * gameState.zoom); uiElements.ctx.restore();
-    }
-  }
-  
-  for (let i = 0; i < tiles_to_draw.length; i++) {
-    const { x, y } = tiles_to_draw[i]; const idx = y * gameState.WORLD_W + x;
-    if (idx === gameState.start || idx === gameState.goal) {
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      counter++;
+      const idx = y * gameState.WORLD_W + x;
+      const tileId = gameState.mapData[idx]; const tile = tileId >= 0 ? tiles[tileId] : null;
       const elevTop    = gameState.elevationGrid[y * gridW + x] || 0;
       const elevRight  = gameState.elevationGrid[y * gridW + (x + 1)] || 0;
       const elevBottom = gameState.elevationGrid[(y + 1) * gridW + (x + 1)] || 0;
@@ -204,11 +202,98 @@ export function draw() {
       const ptTop    = projectPoint(x, y, elevTop); const ptRight  = projectPoint(x + 1, y, elevRight);
       const ptBottom = projectPoint(x + 1, y + 1, elevBottom); const ptLeft   = projectPoint(x, y + 1, elevLeft);
 
-      uiElements.ctx.fillStyle = (idx === gameState.start) ? 'rgba(0,250,0,0.5)' : 'rgba(250,0,0,0.5)';
-      uiElements.ctx.beginPath(); uiElements.ctx.moveTo(ptTop.x, ptTop.y); uiElements.ctx.lineTo(ptRight.x, ptRight.y);
-      uiElements.ctx.lineTo(ptBottom.x, ptBottom.y); uiElements.ctx.lineTo(ptLeft.x, ptLeft.y);
-      uiElements.ctx.closePath(); uiElements.ctx.fill();
-      uiElements.ctx.strokeStyle = (idx === gameState.start) ? '#0f0' : '#f00'; uiElements.ctx.lineWidth = 1.5; uiElements.ctx.stroke();
+      if (tile) {
+        if (tileId === 10 && gameState.tileCache) {
+          const slopeKey = `${tileId}_${elevTop}_${elevRight}_${elevBottom}_${elevLeft}`;
+          const cachedCanvas = gameState.tileCache[slopeKey];
+
+          if (cachedCanvas) {
+            const minElev = Math.min(elevTop, elevRight, elevBottom, elevLeft);
+            const ptMin = projectPoint(x, y, minElev);
+            
+            const drawX = ptMin.x - ((cachedCanvas.width * gameState.zoom) / 2);
+            const drawY = ptMin.y - (50 * gameState.zoom);
+
+            uiElements.ctx.drawImage(
+              cachedCanvas, 
+              drawX, 
+              drawY, 
+              cachedCanvas.width * gameState.zoom, 
+              cachedCanvas.height * gameState.zoom
+            );
+          } else {
+            uiElements.ctx.fillStyle = tile.color; uiElements.ctx.beginPath();
+            uiElements.ctx.moveTo(ptTop.x, ptTop.y); uiElements.ctx.lineTo(ptRight.x, ptRight.y);
+            uiElements.ctx.lineTo(ptBottom.x, ptBottom.y); uiElements.ctx.lineTo(ptLeft.x, ptLeft.y);
+            uiElements.ctx.closePath(); uiElements.ctx.fill();
+          }
+        } else {
+          const slope = (elevTop + elevLeft) - (elevBottom + elevRight);
+          let fillColor = tile.color;
+          if (slope > 2) fillColor = shadeColor(tile.color, 0.15); 
+          else if (slope < -2) { const darkness = Math.max(-0.4, slope * 0.006); fillColor = shadeColor(tile.color, darkness); }
+          uiElements.ctx.fillStyle = fillColor; uiElements.ctx.beginPath();
+          uiElements.ctx.moveTo(ptTop.x, ptTop.y); uiElements.ctx.lineTo(ptRight.x, ptRight.y);
+          uiElements.ctx.lineTo(ptBottom.x, ptBottom.y); uiElements.ctx.lineTo(ptLeft.x, ptLeft.y);
+          uiElements.ctx.closePath(); uiElements.ctx.fill();
+        }
+
+        uiElements.ctx.beginPath();
+        uiElements.ctx.moveTo(ptTop.x, ptTop.y); uiElements.ctx.lineTo(ptRight.x, ptRight.y);
+        uiElements.ctx.lineTo(ptBottom.x, ptBottom.y); uiElements.ctx.lineTo(ptLeft.x, ptLeft.y);
+        uiElements.ctx.closePath();
+        uiElements.ctx.strokeStyle = 'rgba(0,0,0,0.15)'; uiElements.ctx.lineWidth = 1; uiElements.ctx.stroke();
+
+        if (tile.height > 0) drawIsometric3DBuilding(x, y, tileId, tile.height);
+      } else {
+        uiElements.ctx.fillStyle = '#1a1410'; uiElements.ctx.beginPath();
+        uiElements.ctx.moveTo(ptTop.x, ptTop.y); uiElements.ctx.lineTo(ptRight.x, ptRight.y);
+        uiElements.ctx.lineTo(ptBottom.x, ptBottom.y); uiElements.ctx.lineTo(ptLeft.x, ptLeft.y);
+        uiElements.ctx.closePath(); uiElements.ctx.fill();
+      }
+
+      const obj = gameState.mapObjects[idx];
+      if (obj && objectTypes[obj.type]) {
+        const typeCfg = objectTypes[obj.type];
+        const elevAverage = (elevTop + elevRight + elevBottom + elevLeft) / 4;
+        const centerPt = projectPoint(x + 0.5, y + 0.5, elevAverage);
+        const objX = centerPt.x + (obj.offsetX * gameState.zoom); const objY = centerPt.y + (obj.offsetY * gameState.zoom);
+        
+        uiElements.ctx.save(); uiElements.ctx.translate(objX, objY);
+        const diffX = (elevRight + elevBottom) - (elevTop + elevLeft); const diffY = (elevBottom + elevLeft) - (elevTop + origin);
+        
+        if (typeCfg.alignWithSlope) {
+          const angleRotation = Math.atan2(diffX * (54 / 2), 94) * 0.45; uiElements.ctx.rotate(angleRotation);
+          const scaleY = 1 - Math.min(0.25, Math.abs(diffY) * 0.008); uiElements.ctx.scale(1, scaleY);
+        } else {
+          uiElements.ctx.save(); uiElements.ctx.scale(1.2, 0.5);
+          uiElements.ctx.fillStyle = "rgba(0, 0, 0, 0.25)"; uiElements.ctx.beginPath(); uiElements.ctx.arc(0, 0, obj.size * gameState.zoom, 0, Math.PI * 2);
+          uiElements.ctx.fill(); uiElements.ctx.restore();
+        }
+        typeCfg.draw(uiElements.ctx, obj.size * gameState.zoom); uiElements.ctx.restore();
+      }
+    }
+  }
+  gameState.renderedTilesCount = counter;
+
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      const idx = y * gameState.WORLD_W + x;
+      if (idx === gameState.start || idx === gameState.goal) {
+        const elevTop    = gameState.elevationGrid[y * gridW + x] || 0;
+        const elevRight  = gameState.elevationGrid[y * gridW + (x + 1)] || 0;
+        const elevBottom = gameState.elevationGrid[(y + 1) * gridW + (x + 1)] || 0;
+        const elevLeft   = gameState.elevationGrid[(y + 1) * gridW + x] || 0;
+
+        const ptTop    = projectPoint(x, y, elevTop); const ptRight  = projectPoint(x + 1, y, elevRight);
+        const ptBottom = projectPoint(x + 1, y + 1, elevBottom); const ptLeft   = projectPoint(x, y + 1, elevLeft);
+
+        uiElements.ctx.fillStyle = (idx === gameState.start) ? 'rgba(0,250,0,0.5)' : 'rgba(250,0,0,0.5)';
+        uiElements.ctx.beginPath(); uiElements.ctx.moveTo(ptTop.x, ptTop.y); uiElements.ctx.lineTo(ptRight.x, ptRight.y);
+        uiElements.ctx.lineTo(ptBottom.x, ptBottom.y); uiElements.ctx.lineTo(ptLeft.x, ptLeft.y);
+        uiElements.ctx.closePath(); uiElements.ctx.fill();
+        uiElements.ctx.strokeStyle = (idx === gameState.start) ? '#0f0' : '#f00'; uiElements.ctx.lineWidth = 1.5; uiElements.ctx.stroke();
+      }
     }
   }
   

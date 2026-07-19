@@ -1,4 +1,6 @@
 import { TILE_W, TILE_H, ELEVATION_SCALE, origin, gameState } from './state.js';
+// CORRECTION : Importation depuis engine.js où réside désormais la fonction
+import { preRenderMapCache } from './engine.js';
 
 export function projectPoint(gx, gy, elevation) {
   return {
@@ -20,7 +22,6 @@ export function unprojectPoint(screenX, screenY) {
   return { x: gx, y: gy };
 }
 
-// Cache de performance pré-alloué pour éviter le Garbage Collection intensif dans la boucle de détection
 let cachedTilesToCheck = [];
 let lastCachedW = 0, lastCachedH = 0;
 
@@ -192,6 +193,9 @@ export function modifyElevationAtCell(cellIndex, raise = true) {
       gameState.elevationGrid[vIdx] = Math.max(0, gameState.elevationGrid[vIdx] + amount);
     }
   }
+
+  preRenderMapCache();
+
   if (gameState.start >= 0 && gameState.goal >= 0 && gameState.path.length > 0) {
     gameState.path = findPathAStar(gameState.start, gameState.goal);
   }
