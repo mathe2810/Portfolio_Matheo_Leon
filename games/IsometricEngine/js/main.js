@@ -122,7 +122,7 @@ window.addEventListener('DOMContentLoaded', () => {
   generateMapObjects();
   
   gameState.testTextureImage = new Image();
-  gameState.testTextureImage.src = 'tales.png';
+  gameState.testTextureImage.src = 'tales_3.png';
   gameState.testTextureImage.onload = () => {
     gameState.tilePattern = uiElements.ctx.createPattern(gameState.testTextureImage, 'repeat');
     preRenderMapCache(); 
