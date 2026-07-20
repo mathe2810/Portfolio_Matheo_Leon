@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Isometric Texture Generator</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #f7f8fb;
+      color: #0f172a;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem;
+    }
+    .container {
+      max-width: 600px;
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      border-radius: 18px;
+      padding: 2rem;
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+      text-align: center;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 0.5rem; color: #1f4ed8; }
+    p { color: #64748b; font-size: 0.95rem; margin-bottom: 1.5rem; }
+    .drop-zone {
+      border: 2px dashed #1f4ed8;
+      border-radius: 12px;
+      padding: 2rem;
+      background: #f0f4ff;
+      cursor: pointer;
+      transition: background 0.2s;
+      margin-bottom: 1.5rem;
+    }
+    .drop-zone:hover { background: #e2ebff; }
+    input[type="file"] { display: none; }
+    .preview-box {
+      margin: 1.5rem 0;
+      display: none;
+    }
+    .preview-title { font-weight: 600; margin-bottom: 0.5rem; font-size: 0.9rem; }
+    canvas {
+      background-image: repeating-conic-gradient(#fff 0% 25%, #e5e7eb 0% 50%);
+      background-size: 10px 10px;
+      border: 1px solid #cbd5e1;
+      image-rendering: pixelated;
+      max-width: 100%;
+      height: auto;
+    }
+    .btn {
+      display: inline-block;
+      background: #1f4ed8;
+      color: white;
+      padding: 0.75rem 1.5rem;
+      border-radius: 999px;
+      text-decoration: none;
+      font-weight: 700;
+      border: none;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn:hover { background: #0f3fbf; }
+    .btn:disabled { background: #cbd5e1; cursor: not-allowed; }
+    .back-link { margin-top: 1.5rem; display: inline-block; color: #64748b; text-decoration: none; font-size: 0.9rem; }
+    .back-link:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h1>Générateur de Texture Isométrique</h1>
+  <p>Glisse une texture carrée (ex: herbe) pour l'ajuster instantanément en un diamant parfait de <strong>94x54 pixels</strong>.</p>
+  
+  <div class="drop-zone" id="dropZone">
+    <span>Clique ou glisse ton image carrée ici</span>
+    <input type="file" id="fileInput" accept="image/*" />
+  </div>
+
+  <div class="preview-box" id="previewBox">
+    <div class="preview-title">Aperçu Réel (Rendu Pixelisé Élargi pour contrôle) :</div>
+    <!-- Le canvas fait STRICTEMENT 94x54 en interne -->
+    <canvas id="isoCanvas" width="94" height="54" style="width: 282px; height: 162px;"></canvas>
+    <div style="margin-top: 0.5rem;"><button class="btn" id="downloadBtn">Télécharger la texture (94x54)</button></div>
+  </div>
+
+  <a href="../../index.html" class="back-link">← Retour au Portfolio</a>
+</div>
+
+<script>
+  const dropZone = document.getElementById('dropZone');
+  const fileInput = document.getElementById('fileInput');
+  const previewBox = document.getElementById('previewBox');
+  const canvas = document.getElementById('isoCanvas');
+  const ctx = canvas.getContext('2d');
+  const downloadBtn = document.getElementById('downloadBtn');
+
+  dropZone.addEventListener('click', () => fileInput.click());
+  
+  dropZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropZone.style.background = "#e2ebff";
+  });
+
+  dropZone.addEventListener('dragleave', () => {
+    dropZone.style.background = "#f0f4ff";
+  });
+
+  dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.style.background = "#f0f4ff";
+    if (e.dataTransfer.files.length) {
+      processImage(e.dataTransfer.files[0]);
+    }
+  });
+
+  fileInput.addEventListener('change', (e) => {
+    if (e.target.files.length) {
+      processImage(e.target.files[0]);
+    }
+  });
+
+  function processImage(file) {
+    const reader = new FileReader();
+    reader.onload = function(event) {
+      const img = new Image();
+      img.onload = function() {
+        // Nettoyage et désactivation du lissage pour le pixel-art
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.imageSmoothingEnabled = false;
+
+        ctx.save();
+        
+        // Déplacement au centre du canvas (47, 27)
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        
+        // Matrice de transformation isométrique pure sans cisaillement parasite
+        // Mappe les 4 coins du carré sur les 4 sommets du diamant (94x54)
+        const m11 = canvas.width / (2 * img.width);
+        const m12 = canvas.height / (2 * img.width);
+        const m21 = -canvas.width / (2 * img.height);
+        const m22 = canvas.height / (2 * img.height);
+        
+        ctx.transform(m11, m12, m21, m22, 0, 0);
+        
+        // Dessin centré de l'image d'origine
+        ctx.drawImage(img, -img.width / 2, -img.height / 2, img.width, img.height);
+        
+        ctx.restore();
+        
+        previewBox.style.display = "block";
+      }
+      img.src = event.target.result;
+    }
+    reader.readAsDataURL(file);
+  }
+
+  downloadBtn.addEventListener('click', () => {
+    const link = document.createElement('a');
+    link.download = 'grass_tile_94x54.png';
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  });
+</script>
+</body>
+</html> 
